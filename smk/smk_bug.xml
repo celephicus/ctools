@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+
+<!-- Event EV_TEST_END does not generate correct code! -->
+
+<machine name="comms">
+
+<include> 
+#include &lt;stdint.h&gt;
+#include &lt;avr/io.h&gt;
+#include &lt;avr/interrupt.h&gt;
+#include &lt;avr/pgmspace.h&gt;
+
+#include "projectconfig.h"
+#include "types.h"
+#include "event.h"
+#include "board.h"
+#include "board_driver.h"
+#include "utils.h"
+#include "uart.h"
+#include "shared.h"
+</include>   
+
+<property> uint16_t timer_cookie[3]; </property>
+<options> no-event-decl </options> 
+
+<code>
+enum {
+    COMMS_TIMEOUT_MS = 3000,
+    COMMS_PERIOD_MS = 3000,
+    HANDLE_SOC_UPDATE_PERIOD_SECS = 1,
+    INFO_LINE_BREAK_DURATION_MS = 500,
+    HANDLE_TIMEOUT_MS = 3000,
+    TEST_HANDLE_CYCLE_PERIOD_SECS = 30,
+};
+static void start_timer(uint8_t idx, uint16_t timeout) {
+    PROP(timer_cookie[idx - EVENT_TIMER_2]) = eventTimerStart(idx, timeout);
+}
+enum {
+    TEST_COUNTER_SCALING = 20,
+};
+static void display_test_count(uint16_t value, uint8_t colour) {
+    switch (value % 5) {
+        case 0: boardSetLedColour(BOARD_MAKE_LED_COLOURS(LED_COLOUR_OFF, LED_COLOUR_OFF, LED_COLOUR_OFF, LED_COLOUR_OFF, LED_COLOUR_OFF, LED_COLOUR_OFF)); break;
+        case 1: boardSetLedColour(BOARD_MAKE_LED_COLOURS(colour, LED_COLOUR_OFF, LED_COLOUR_OFF, LED_COLOUR_OFF, LED_COLOUR_OFF, LED_COLOUR_OFF)); break;
+        case 2: boardSetLedColour(BOARD_MAKE_LED_COLOURS(colour, colour,         LED_COLOUR_OFF, LED_COLOUR_OFF, LED_COLOUR_OFF, LED_COLOUR_OFF)); break;
+        case 3: boardSetLedColour(BOARD_MAKE_LED_COLOURS(colour, colour,         colour,         LED_COLOUR_OFF, LED_COLOUR_OFF, LED_COLOUR_OFF)); break;
+        case 4: boardSetLedColour(BOARD_MAKE_LED_COLOURS(colour, colour,         colour,         colour,         LED_COLOUR_OFF, LED_COLOUR_OFF)); break;
+    }
+}
+static uint8_t l_phase;
+</code>
+
+<!-- Wait for a battery to be connected, then send a break. Then send the SoC state every so often as a single character. -->    
+<init target='WaitForBattery'/>
+
+<state name='Test'>
+    <init target='TestRunning'/>
+    <entry>
+        start_timer(EVENT_TIMER_3, BOARD_TICKS_PER_SEC);         
+    </entry>
+    <transition event='EV_TIMEOUT_3' guard='(PROP(timer_cookie[1]) == event_get_param16(ev))'>
+        start_timer(EVENT_TIMER_3, BOARD_TICKS_PER_SEC);    
+        switch (l_phase) {
+        case 0:
+            // Count 20's.
+            display_test_count(bdGetVal(BD_VAL_TEST_COUNTER) / TEST_COUNTER_SCALING, LED_COLOUR_RED);
+            l_phase = 1;
+            break;
+        case 1:
+            // Count 100's
+            display_test_count(bdGetVal(BD_VAL_TEST_COUNTER) / (TEST_COUNTER_SCALING * 5), LED_COLOUR_LIME);
+            l_phase = 2;
+            break;
+        case 2:
+            display_test_count(bdGetVal(BD_VAL_TEST_COUNTER) / (TEST_COUNTER_SCALING * 5 * 5), LED_COLOUR_BLUE);
+            l_phase = 0;
+            break;
+        }
+    </transition>
+
+    <state name='TestRunning'>
+        <entry>
+            start_timer(EVENT_TIMER_2, BOARD_TICKS_PER_SEC); 
+            bdSetVal(BD_VAL_TEST_COUNTER, 0);
+            PROP(timer_cookie[2]) += 1; // Invalidate cookie so even if an old event is received it will fail the guard condition.
+        </entry>
+        <transition event='EV_TIMEOUT_2' guard='(PROP(timer_cookie[0]) == event_get_param16(ev))'>
+            uartPutsConst(PSTR("START\r"));
+            start_timer(EVENT_TIMER_4, HANDLE_TIMEOUT_MS * BOARD_TICKS_PER_SEC / 1000); 
+            bdSetVal(BD_VAL_TEST_COUNTER, bdGetVal(BD_VAL_TEST_COUNTER) + 1); 
+            start_timer(EVENT_TIMER_2, TEST_HANDLE_CYCLE_PERIOD_SECS * BOARD_TICKS_PER_SEC); 
+        </transition>
+        <transition event='EV_HANDLE_RESPONSE'>
+            eventTimerStop(EVENT_TIMER_4);
+        </transition>
+        <transition event='EV_TIMEOUT_4' guard='(PROP(timer_cookie[2]) == event_get_param16(ev))' target='TestDone'/>
+    </state>
+    
+    <state name='TestDone'>
+    </state>
+
+    <transition event='EV_TEST_END' target='WaitForBattery'/>
+</state>
+
+<state name='Normal'>
+    <transition event='EV_TEST_START' target='Test'/>
+
+    <state name='WaitForBattery'>
+        <transition event='EV_BATTERY_CONNECT' target='BatteryConnected'/>
+    </state>
+
+    <state name='BatteryConnected'>
+        <transition event='EV_BATTERY_DISCONNECT' target='WaitForBattery'/>
+        <init target='WakeupHandle'/>
+
+        <state name='WakeupHandle'>
+            <entry>
+                start_timer(EVENT_TIMER_2, INFO_LINE_BREAK_DURATION_MS * BOARD_TICKS_PER_SEC / 1000); 
+                if (!(bdGetFlags() &amp; BD_FLAG_MASK_SEND_CHARGE_STATE_TO_HANDLE_DISABLE))
+                    uartSetBreak(1);
+            </entry>
+            <exit>
+                if (!(bdGetFlags() &amp; BD_FLAG_MASK_SEND_CHARGE_STATE_TO_HANDLE_DISABLE))
+                    uartSetBreak(0);
+            </exit>
+            <transition event='EV_TIMEOUT_2' guard='(PROP(timer_cookie[0]) == event_get_param16(ev))' target='SendSoc'/>
+        </state>
+        
+        <state name='SendSoc'>
+            <entry>
+                start_timer(EVENT_TIMER_2, HANDLE_SOC_UPDATE_PERIOD_SECS * BOARD_TICKS_PER_SEC); 
+                start_timer(EVENT_TIMER_3, HANDLE_TIMEOUT_MS * BOARD_TICKS_PER_SEC / 1000); 
+            </entry>
+            <transition event='EV_TIMEOUT_2' guard='(PROP(timer_cookie[0]) == event_get_param16(ev))'>
+                if (!(bdGetFlags() &amp; BD_FLAG_MASK_SEND_CHARGE_STATE_TO_HANDLE_DISABLE))
+                    bdSendChargeStateToHandle();
+                start_timer(EVENT_TIMER_2, HANDLE_SOC_UPDATE_PERIOD_SECS * BOARD_TICKS_PER_SEC); 
+            </transition>
+            <transition event='EV_HANDLE_RESPONSE'>
+                start_timer(EVENT_TIMER_3, HANDLE_TIMEOUT_MS * BOARD_TICKS_PER_SEC / 1000); 
+            </transition>
+            <!-- TODO: Add back off to timeout so that it doesn't sit & spin forever. -->
+            <transition event='EV_TIMEOUT_3' guard='(PROP(timer_cookie[1]) == event_get_param16(ev))' target='WakeupHandle'/>
+        </state>    
+    </state>    
+</state>    <!-- Closes state `Normal'. -->
+</machine>
