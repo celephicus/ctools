@@ -1,0 +1,49 @@
+#! /usr/bin/python3
+
+'''
+Search for lines like these:
+#define CFG_BUILD_NUMBER 2						# Increment number.
+#define CFG_BUILD_TIMESTAMP "20220925T112148"	# Set new datestamp.
+Fail if either not found.
+'''
+
+import re, time, argparse
+import codegen
+
+INFILE_DEFAULT = 'project_config.h'
+    
+# Parse command line arguments.
+parser = argparse.ArgumentParser(description='Updates build number & date in #defined symbols in C header file.')
+parser.add_argument('infile', default=INFILE_DEFAULT, nargs='?', help='Input file, will be overwritten.')
+parser.add_argument('-v', '--verbose', default=0, action='count',
+  help='Produce some more verbose output, default is a single line on success.')
+parser.add_argument('-q', '--quiet', default=0, action='count',
+  help='used once, only print errors; twice print _nothing_')
+
+options = parser.parse_args()
+
+# Sort out verbosity.
+if options.verbose:			codegen.verbosity = codegen.V_DEBUG
+elif options.quiet == 1:	codegen.verbosity = codegen.V_ERROR
+elif options.quiet > 1:		codegen.verbosity = codegen.V_QUIET
+else:						codegen.verbosity = codegen.V_INFO
+
+# Read input file.
+cg = codegen.Codegen(options.infile, options.infile)
+text = cg.begin()
+
+# Match & update symbols. Note that symbol must be preceded by a `#define' to be replaced, as the symbol is likely 
+#  referenced after definition in the file.
+UPDATES = (
+	(lambda m: time.strftime('CFG_BUILD_TIMESTAMP "%Y%m%dT%H%M%S"'), r'(?<=#define\s)CFG_BUILD_TIMESTAMP\s+.*$'),
+	(lambda m: f"CFG_BUILD_NUMBER {int(m.group(1)) + 1}", r'(?<=#define\s)CFG_BUILD_NUMBER\s*(\d+)'),
+)
+
+for repl, regex in UPDATES:
+	text, n_sub = re.subn(regex, repl, text, flags=re.M)
+	if n_sub != 1:
+		codegen.error(f"expected line like `{regex}'")
+
+# This rewrites and closes the file. Thanks codegen!
+cg.add(text)
+cg.end()
