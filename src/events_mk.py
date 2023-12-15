@@ -1,5 +1,7 @@
 #! /usr/bin/python3
 
+"""Code generator for events declarations."""
+
 import os, sys, argparse, re
 import codegen
 
@@ -23,17 +25,17 @@ arg_parser = argparse.ArgumentParser(
 arg_parser.add_argument('infile', help='input files', default=[DEFAULT_SRC_FILE], nargs='*')
 arg_parser.add_argument('--output', '-o', help="output file, default input file with extension '.h'", dest='output_fn')
 arg_parser.add_argument('--write-template', help='write example input file', action='store_true', dest='write_template')
-def define_symbol(d):
+def __define_symbol(symbol_def):
 	try:
-		s, r = d.split('=', 1)
-		return s, r
-	except ValueError:
-		raise argparse.ArgumentTypeError(f"'{d}' expected value like 'foo=bar'")
-arg_parser.add_argument('-D', type=define_symbol, help='define a symbol', dest='defines', default=[], nargs='*')
+		symbol, value = symbol_def.split('=', 1)
+		return symbol, value
+	except ValueError as exc:
+		raise argparse.ArgumentTypeError(f"'{symbol_def}' expected value like 'foo=bar'") from exc
+arg_parser.add_argument('-D', type=__define_symbol, help='define a symbol', dest='defines', default=[], nargs='*')
 
-codegen.add_verbosity_options(arg_parser)
+codegen.Verbosity.add_argparse_options(arg_parser)
 options = arg_parser.parse_args()
-codegen.parse_verbosity_options(options)	# Sort out verbosity.
+codegen.Verbosity.parse_options(options)	# Sort out verbosity.
 
 # Default output filename if not given.
 if not options.output_fn:
@@ -41,7 +43,7 @@ if not options.output_fn:
 
 options.defines = dict(options.defines)
 
-codegen.message(f"Command line options {options}\n", codegen.V_DEBUG)
+codegen.message(f"Command line options {options}\n", codegen.Verbosity.DEBUG)
 
 # If we want a template file...
 if options.write_template:
@@ -57,20 +59,20 @@ if options.write_template:
 	codegen.message("done.\n")
 	sys.exit()
 
-def read_logical_lines(f):
+def read_logical_lines(fd):
 	"""Open a file and read lines, ignoring blank lines and line comments. Lines with leading whitespace are joined
 	to the previous line."""
 	lns = []
-	for lineno, ln in enumerate(f, 1):
+	for lineno, ln in enumerate(fd, 1):	# pylint: disable=redefined-outer-name
 		if not ln or ln.isspace() or ln.startswith('#'): continue		# Ignore blank & comments.
 		join = ln[0].isspace()
 		ln = re.sub(r'\s+', ' ', ln).strip()		# Munge whitespace to single space and strip leading & trailing.
 		if join:		# If a continuation line...
-			if not lns: 
+			if not lns:
 				codegen.error(f"continuation line at line {lineno} with no start") # Continuation with nothing to continue.
 			lns[-1][1] = lns[-1][1] + ' ' + ln		# Add to previous.
 		else:
-			lns.append([(f.name, lineno), ln])
+			lns.append([(fd.name, lineno), ln])
 	return lns
 
 events = {}		# Our set of events live in a dict. Insertion order gives integer ID.
@@ -78,10 +80,9 @@ groups = {}		# Set of groups.
 multi = {}		# Record multi events so that we can emit a count.
 
 # Process input files.
-cg = codegen.Codegen(options.infile, options.output_fn)	
-lns = sum(cg.begin(reader=read_logical_lines), [])
+cg = codegen.Codegen(options.infile, options.output_fn)
 
-for ll in lns:
+for ll in sum(cg.begin(reader=read_logical_lines), []):
 	loc = f'{ll[0][0]}:{ll[0][1]}' # String <file>:<lineno> for error messages.
 
 	ln = ll[1]			# Substitute in symbols.
@@ -92,32 +93,33 @@ for ll in lns:
 		ev_name, ev_multi, raw_groups, ev_desc = re.match(r'''
 		  (.*?) (?:\[(.*?)\])? \s+				# <ident> or <ident>[<number>]
 		  (?:\[(.*)\])* \s*
-		  (.*)$''', 
+		  (.*)$''',
 		  ln, re.I|re.X).groups()
 	except AttributeError:
 		codegen.error(f"failed to parse definition at {loc}")
 	ev_groups = [] if not raw_groups else raw_groups.lower().split()
 	ev_groups.append('all')
 
-	def add_event(n, gs, desc):
-		if n in events:
-			codegen.error(f"event {n} at {loc} already exists.")
-		for g in gs:
-			if g not in groups:
-				groups[g] = 0
-		events[n] = gs, desc
+	def __add_event(e_n, e_gps, e_desc):
+		" Add a single event to the collection."
+		if e_n in events:
+			codegen.error(f"event {e_n} at {loc} already exists.") 	#pylint: disable=cell-var-from-loop
+		for x in e_gps:
+			if x not in groups:
+				groups[x] = 0
+		events[e_n] = e_gps, e_desc
 
 	if not ev_multi:
-		add_event(ev_name, ev_groups, ev_desc)
+		__add_event(ev_name, ev_groups, ev_desc)
 	else:
-		try: 
+		try:
 			nn = int(ev_multi)
-		except ValueError: 
+		except ValueError:
 			codegen.error(f"multi definition must be an integer count at {loc}")
 		if nn > 0:
 			multi[ev_name] = nn
 			for n in range(nn):
-				add_event(ev_name+str(n), ev_groups, ev_desc if n == 0 else "")
+				__add_event(ev_name+str(n), ev_groups, ev_desc if n == 0 else "")
 
 # Compute size of mask. Since we access this as 16 bit words, round up size.
 MASK_SIZE = 2 * ((len(events)+15)//16)
@@ -155,7 +157,7 @@ cg.add(f'#define EVENT_TRACE_MASK_SIZE {MASK_SIZE}', add_nl=+1)
 for g,v in groups.items():
 	cg.add_comment(f'Trace mask {g}.')
 	cg.add(
-	  f"#define EVENT_DECLARE_TRACE_MASK_{g.upper()}() static const uint8_t TRACE_MASK_{g.upper()}[] PROGMEM = {{", 
+	  f"#define EVENT_DECLARE_TRACE_MASK_{g.upper()}() static const uint8_t TRACE_MASK_{g.upper()}[] PROGMEM = {{",
 	  indent=1, trailer='\\', col_width=100)
 	cg.add(', '.join([f"0x{(v >> n) & 0xff:02x}" for n in range(0, len(events), 8)]), trailer='\\', col_width=100)
 	cg.add("}", indent=-1, add_nl=1)
@@ -172,4 +174,3 @@ cg.add_nl()
 
 # Finalise output file.
 cg.end()
-
