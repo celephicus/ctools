@@ -1,0 +1,9 @@
+# Event system event definition file.
+# Format is:
+#  <name> [<group>] "<description>"
+#   <name> is a C identifier, usually all caps, will have "EV_" prepended and used in an enum.
+#   <group> is a C identifier used to identify a group of events for a predefined trace mask. There may be multiple groups.
+#   <description" is a short sentence.
+
+SAMPLE_1	[default]			Frobs the foo.
+SAMPLE_2	[debug]		Frobs the foo some more.

@@ -3,9 +3,7 @@
 """A helper for writing code generators.
 """
 
-import sys
-import os
-import re
+import sys, os, re
 
 """ Verbosity levels.
 	DEBUG -- lots of debugging info.
@@ -15,6 +13,20 @@ import re
 """	
 V_DEBUG, V_INFO, V_ERROR, V_QUIET = range(4)
 verbosity = V_INFO
+
+# Helper for clients to add verbosity options to their arguments.
+def add_verbosity_options(parser):
+	parser.add_argument('-v', '--verbose', default=0, action='count',
+  		help='Produce some more verbose output, default is a single line on success.')
+	parser.add_argument('-q', '--quiet', default=0, action='count',
+  		help='used once, only print errors; twice print _nothing_')
+	return parser
+def parse_verbosity_options(options):
+	global verbosity
+	if options.verbose:			verbosity = V_DEBUG
+	elif options.quiet == 1:	verbosity = V_ERROR
+	elif options.quiet > 1:		verbosity = V_QUIET
+	else:						verbosity = V_INFO
 
 def message(msg, lvl=V_INFO):
 	"Print a message with no newline."
@@ -54,19 +66,24 @@ class Codegen:
 	def begin(self, reader=None):
 		"""Read the contents of the input file, either as a single string or using the specified reader function.
 		"""
-		if not isinstance(self.infile, str):
-			raise CodegenException("Multiple input files not supported with begin().")
-		message(f"{self.script}: reading input file `{self.infile}'... ")
-		try:
-			with open(self.infile, 'rt', encoding="utf-8") as fin_r:
-				return fin_r.read() if reader is None else reader(fin_r)
-		except EnvironmentError:
-			error(f"failed to read `{self.infile}'.")
+		message(f"{self.script}: ")
+		def read_single_file(fn):
+			message(f"reading input file `{fn}'... ")
+			try:
+				with open(fn, 'rt', encoding="utf-8") as fin_r:
+					return fin_r.read() if reader is None else reader(fin_r)
+			except EnvironmentError:
+				error(f"failed to read `{fn}'.")
 
-		# We catch a base Exception as the user reader method could raise any exception type.
-		except Exception as exc:	# pylint: disable=broad-except
-			error(f"exception {exc} during reading `{self.infile}'.")
-		return None		# Shut up Pylint.
+			# We catch a base Exception as the user reader method could raise any exception type.
+			#except Exception as exc:	# pylint: disable=broad-except
+			#	error(f"exception `{exc}'' during reading `{fn}'.")
+			return None		# Shut up Pylint.
+
+		if isinstance(self.infile, str):
+			return read_single_file(self.infile)
+		else:
+			return [read_single_file(fn) for fn in self.infile]
 
 	def add(self, text, eat_nl=False, add_nl=None, trailer='', col_width=0, indent=0): # pylint: disable=too-many-arguments
 		"""Add either a string that will be split into lines, or a list of lines to the contents of the output file. Indentation will be added.

@@ -18,7 +18,6 @@ SAMPLE_2	[default debug]		Frobs the foo some more.
 '''
 
 arg_parser = argparse.ArgumentParser(
-	prog=os.path.splitext(os.path.basename(sys.argv[0]))[0],
 	description="Build set of event definitions from a number of definition files."
 )
 arg_parser.add_argument('infile', help='input files', default=[DEFAULT_SRC_FILE], nargs='*')
@@ -32,19 +31,21 @@ def define_symbol(d):
 		raise argparse.ArgumentTypeError(f"'{d}' expected value like 'foo=bar'")
 arg_parser.add_argument('-D', type=define_symbol, help='define a symbol', dest='defines', default=[], nargs='*')
 
-args = arg_parser.parse_args()
+codegen.add_verbosity_options(arg_parser)
+options = arg_parser.parse_args()
+codegen.parse_verbosity_options(options)	# Sort out verbosity.
 
 # Default output filename if not given.
-if not args.output_fn:
-	args.output_fn = os.path.splitext(args.infile[0])[0]+'.h'
+if not options.output_fn:
+	options.output_fn = os.path.splitext(options.infile[0])[0]+'.h'
 
-args.defines = dict(args.defines)
+options.defines = dict(options.defines)
 
-print(args)
+codegen.message(f"Command line options {options}\n", codegen.V_DEBUG)
 
 # If we want a template file...
-if args.write_template:
-	template_fn = args.infile[0]
+if options.write_template:
+	template_fn = options.infile[0]
 	codegen.message(f"Writing template file {template_fn} ... ")
 	if os.path.isfile(template_fn):
 		codegen.error('file exists, aborting')
@@ -56,24 +57,20 @@ if args.write_template:
 	codegen.message("done.\n")
 	sys.exit()
 
-def read_logical_lines(fn):
+def read_logical_lines(f):
 	"""Open a file and read lines, ignoring blank lines and line comments. Lines with leading whitespace are joined
 	to the previous line."""
-	try:
-		lns = []
-		with open(fn, 'rt') as f:
-			for lineno, ln in enumerate(f, 1):
-				if not ln or ln.isspace() or ln.startswith('#'): continue		# Ignore blank & comments.
-				join = ln[0].isspace()
-				ln = re.sub(r'\s+', ' ', ln).strip()		# Munge whitespace to single space and strip leading & trailing.
-				if join:		# If a continuation line...
-					if not lns: 
-						codegen.error(f"continuation line at line {lineno} with no start") # Continuation with nothing to continue.
-					lns[-1][1] = lns[-1][1] + ' ' + ln		# Add to previous.
-				else:
-					lns.append([(fn, lineno), ln])
-	except OSError as e:
-		codegen.error(f"could not read file `{e.filename}'")
+	lns = []
+	for lineno, ln in enumerate(f, 1):
+		if not ln or ln.isspace() or ln.startswith('#'): continue		# Ignore blank & comments.
+		join = ln[0].isspace()
+		ln = re.sub(r'\s+', ' ', ln).strip()		# Munge whitespace to single space and strip leading & trailing.
+		if join:		# If a continuation line...
+			if not lns: 
+				codegen.error(f"continuation line at line {lineno} with no start") # Continuation with nothing to continue.
+			lns[-1][1] = lns[-1][1] + ' ' + ln		# Add to previous.
+		else:
+			lns.append([(f.name, lineno), ln])
 	return lns
 
 events = {}		# Our set of events live in a dict. Insertion order gives integer ID.
@@ -81,12 +78,14 @@ groups = {}		# Set of groups.
 multi = {}		# Record multi events so that we can emit a count.
 
 # Process input files.
-lns = sum([read_logical_lines(fn) for fn in args.infile], [])
+cg = codegen.Codegen(options.infile, options.output_fn)	
+lns = sum(cg.begin(reader=read_logical_lines), [])
+
 for ll in lns:
 	loc = f'{ll[0][0]}:{ll[0][1]}' # String <file>:<lineno> for error messages.
 
 	ln = ll[1]			# Substitute in symbols.
-	for sym, repl in args.defines.items():
+	for sym, repl in options.defines.items():
 		ln = re.sub(r'\$'+sym, repl, ln)
 
 	try:
@@ -131,7 +130,6 @@ for ev_g in [x[0] for x in reversed(events.values())]:
 			groups[g] |= 1
 
 # We have enough to generate the event definitions.
-cg = codegen.Codegen(args.infile, args.output_fn)	
 cg.add_autogen_comment()
 cg.add_include_guard()
 

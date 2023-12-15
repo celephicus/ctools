@@ -15,18 +15,9 @@ INFILE_DEFAULT = 'project_config.h'
 # Parse command line arguments.
 parser = argparse.ArgumentParser(description='Updates build number & date in #defined symbols in C header file.')
 parser.add_argument('infile', default=INFILE_DEFAULT, nargs='?', help='Input file, will be overwritten.')
-parser.add_argument('-v', '--verbose', default=0, action='count',
-  help='Produce some more verbose output, default is a single line on success.')
-parser.add_argument('-q', '--quiet', default=0, action='count',
-  help='used once, only print errors; twice print _nothing_')
-
+codegen.add_verbosity_options(parser)
 options = parser.parse_args()
-
-# Sort out verbosity.
-if options.verbose:			codegen.verbosity = codegen.V_DEBUG
-elif options.quiet == 1:	codegen.verbosity = codegen.V_ERROR
-elif options.quiet > 1:		codegen.verbosity = codegen.V_QUIET
-else:						codegen.verbosity = codegen.V_INFO
+codegen.parse_verbosity_options(options)	# Sort out verbosity.
 
 # Read input file.
 cg = codegen.Codegen(options.infile, options.infile)
