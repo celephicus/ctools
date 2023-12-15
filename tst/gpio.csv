@@ -1,0 +1,31 @@
+@processor,avr8,Arduino Mega 328P,,,,,,,,
+@project,Ropemaker Controller,,,,,,,,
+,,,,,,,,,
+#Arduino Pin,Signal,Function,Description,Group,Arduino Pin No.,Processor Pin No.,Processor Port,Processor Alternate Function,Comment
+D1/TXO,CONS_TX,TXD,Console serial data out,Console,J7/12,31,PD1,TXD/PCINT17,Bootloader
+D0/RXI,CONS_RX,RXD,Console serial data in,Console,J7/11,30,PD0,RXD/PCINT16,Bootloader
+D2,E_MON,input,Monitor 12V supply to Run rly via E Stop Sw. ,Switch,J7/8,32,PD2,INT0/PCINT18,
+D3,RLY_RUN,direct,Run relay active high.,Output,OutputJ7/7,1,PD3,PCINT19/OC2B/INT1,PWM
+D4,REM1_RUN,input,Wired remote RUN/STOP active low.,Switch,J7/6,2,PD4,PCINT20/XCK/T0,
+D5,REM1_DIR,input,Wired remote FWD/REV active low.,Switch,J7/5,9,PD5,PCINT21/OC0B/T1,PWM
+D6,REM2_RUN,input,Wireless remote RUN/STOP active low.,Switch,J7/4,10,PD6,PCINT22/OC0A/AIN0,PWM
+D7,REM2_DIR,input,Wireless remote FWD/REV active low.,Switch,J7/3,11,PD7,PCINT23/AIN1,
+D8,RLY_DIR2,direct,Dir 2 relay active high.,Output,J7/2,12,PB0,PCINT0/CLKO/ICP1,
+D9,RLY_START,direct,Soft start relay active high.,Output,J7/1,13,PB1,PCINT1/OC1A,PWM
+D10,LEDS,output,WS2812 indicators drive.,Output,J6/12,14,PB2,PCINT2/SS/OC1B,PWM
+D11/MOSI,,,,SPI,J6/11,15,PB3,PCINT3/OC2A/MOSI,PWM
+D12/MISO,,,,SPI,J6/10,16,PB4,PCINT4/MISO,
+D13/SCK,HEARTBEAT_LED,direct,Blinky LED,SPI,J6/9,17,PB5,SCK/PCINT5,LED returned to GND.
+A0,V_MON,ADC0,Monitor input volts.,Analogue,J6/8,23,PC0,ADC0/PCINT8,
+A1,RLY_DIR1,direct,Dir 1 relay active high.,Output,J6/7,24,PC1,ADC1/PCINT9,
+A2,SW_RUN,input,RUN/STOP button active low.,Switch,J6/6,25,PC2,ADC2/PCINT10,
+A3,SW_DIR,input,FWD/REV button active low.,Switch,J6/5,26,PC3,ADC3/PCINT11,
+A4,DEBUG_0,direct,,Output,,27,PC4,ADC4/SDA/PCINT12,
+A5,,,,,,28,PC5,ADC5/SCL/PCINT13,
+A6,,,,,,19,ADC6,ADC6,Analogue input only.
+A7,,,,,,22,ADC7,ADC7,Analogue input only.
+RST,,,,,"J7/10, J6/3",29,PC6,RESET/PCINT14,
+GND,,,,,"J7/9, J6/2","3, 5, 21",GND,,
+VCC,,,,,J6/4,"4, 6",VCC,,
+RAW,,,,,J6/1,,,,Max 12V.
+,,,,,,7,PB6,PCINT6/XTAL1/TOSC1,Resonator
