@@ -86,9 +86,10 @@ class CSVparse:
 		"""Sets up a new parser, must be called by subclasses if they have an __init__() method.
 			HINT: use `super().__init__(...)'."""
 		self.filename = None	# Filename being read from.
-		self.lineno = 0			# The current line being red is held as an attribute for error message formatting.
+		self.lineno = 0			# The current line being read is held as an attribute for error message formatting.
 		self.data = []			# Data from each row ends up here as a dict with keys from the COLS class attribute.
 		self._extra	= {}		# Used by validators to add extra key/values to the row data.
+		self.metadata = {}		# Data from directives might end up here.
 
 	def get_error_msg(self, category, msg):
 		"""Called from read, formats an error message."""

@@ -2,15 +2,30 @@
 
 """Code generator to turn a CSV representation of GPIO signals into a bunch of definitions for a C header file.
 """
-import sys, re, os
+import sys, re, os, argparse
 import csv_parser
 import codegen
 
-# pin    sig       func desc     group     apin  ppin port note
-# D1/TXD,RS485_TXD,TXD0,RS485 TX,RS485 Bus,J7/12,31,  PD1, TXD/PCINT17,Bootloader
+INFILE_DEFAULT = 'gpio.csv'
+
+# Parse command line arguments.
+arg_parser = argparse.ArgumentParser(
+	description='Code generator to turn a CSV representation of GPIO signals into definitions in a C header file.')
+arg_parser.add_argument('infile', default=INFILE_DEFAULT, help='Input csv file.')
+arg_parser.add_argument('--output', '-o', default=None, help="output file, default input file with extension '.h'")
+
+codegen.Verbosity.add_argparse_options(arg_parser)
+options = arg_parser.parse_args()
+codegen.Verbosity.parse_options(options)	# Sort out verbosity.
+if not options.output:
+	options.output = os.path.splitext(os.path.basename(options.infile))[0] + '.h'	# Write to current directory
 
 class GPIOParse(csv_parser.CSVparse):
-	"Class to handle parsing a CSV file with GPIO definitions."
+	"""Class to handle parsing a CSV file with GPIO definitions.
+
+	pin    sig       func desc     group     apin  ppin port note
+	D1/TXD,RS485_TXD,TXD0,RS485 TX,RS485 Bus,J7/12,31,  PD1, TXD/PCINT17,Bootloader
+	"""
 	def __init__(self):
 		csv_parser.CSVparse.__init__(self)
 		self.COLUMN_NAMES = 'Pin Sig Func Description Group Apin Ppin Port AltFunc Comment'.split() # pylint: disable=invalid-name
@@ -21,7 +36,7 @@ class GPIOParse(csv_parser.CSVparse):
 		if directive in 'processor project'.split():
 			if directive in self.metadata:
 				self.error(f"directive `{directive}' can only appear once")
-			self.metadata[directive] = data[0]		# We check this later.
+			self.metadata[directive] = data[:2]		# We check this later.
 		elif directive == 'symbol':
 			macro, expansion = data[:2]
 			if not codegen.is_ident(macro):
@@ -31,7 +46,7 @@ class GPIOParse(csv_parser.CSVparse):
 			super().handle_directive(directive, data)
 	def on_first_data(self):
 		"Validate that we have the correct metadata."
-		proc = self.metadata.get('processor', '*none*')
+		proc, desc = self.metadata.get('processor', '*none*')
 		if proc.lower() != 'avr8':
 			self.error(f"cannot use processor `{proc}'")
 	def validate_col_Pin(self, pin_name): # pylint: disable=no-self-use,invalid-name
@@ -59,9 +74,7 @@ class GPIOParse(csv_parser.CSVparse):
 		return port
 
 # Parse...
-INFILE = sys.argv[1]
-OUTFILE = os.path.splitext(os.path.basename(INFILE))[0] + '.h'	# Write to current directory
-cg = codegen.Codegen(INFILE, OUTFILE)
+cg = codegen.Codegen(options.infile, options.output)
 parser = GPIOParse()
 cg.begin(parser.read)
 
@@ -85,6 +98,7 @@ for d in parser.data:
 # Write output file...
 cg.add_include_guard()
 cg.add_autogen_comment()
+
 cg.add_comment(f'Pin Assignments for {parser.metadata.get("processor", "<none>")}, project: {parser.metadata.get("project", "<none>")}.')
 
 cg.add('enum {')
