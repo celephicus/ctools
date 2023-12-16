@@ -1,5 +1,6 @@
 @processor,avr8,Arduino Mega 328P,,,,,,,,
 @project,Ropemaker Controller,,,,,,,,
+@symbol,FOO,bar = 33,1
 ,,,,,,,,,
 #Arduino Pin,Signal,Function,Description,Group,Arduino Pin No.,Processor Pin No.,Processor Port,Processor Alternate Function,Comment
 D1/TXO,CONS_TX,TXD,Console serial data out,Console,J7/12,31,PD1,TXD/PCINT17,Bootloader

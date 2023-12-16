@@ -104,11 +104,12 @@ class CSVparse:
 		"""Used by validators to add some extra data to the row dict."""
 		self._extra[key] = val
 
-	# Directives start with this string.
+	# Directives start with this string. Args are padded with blanks up to the maximum given.
 	DIRECTIVE_LEADER_STR = '@'	# pylint: disable=invalid-name
-	def handle_directive(self, directive, data):	# pylint: disable=unused-argument
-		"""Override to do something with directives."""
-		self.warning(f"unexpected directive `{directive}'")
+	MAX_DIRECTIVE_ARGS = 2
+	def handle_unknown_directive(self, directive, data):	# pylint: disable=unused-argument
+		"""Override to do something creative with directives."""
+		self.error(f"unexpected directive `{directive}'")
 
 	# Set names for all columns. Any extra columns in input are ignored.
 	COLUMN_NAMES = ()	# pylint disable=invalid-name
@@ -142,9 +143,12 @@ class CSVparse:
 				if not row:	continue								# Ignore blank lines.
 				if row[0].startswith('#'): continue					# Ignore comments
 
-				# Is a directive?
+				# Is a directive? Either call subclass handler or unknown handler.
 				if m := re.match(rf'{self.DIRECTIVE_LEADER_STR}(.*)$', row[0]):
-					self.handle_directive(m.group(1), row[1:])
+					directive = m.group(1).lower()
+					args = row[1:] + ['']*self.MAX_DIRECTIVE_ARGS
+					d_handler = getattr(self, 'handle_directive_' + directive, self.handle_unknown_directive)
+					d_handler(directive, args)
 					continue
 
 				if not self.data:									# On first row of data, call validator.

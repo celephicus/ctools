@@ -19,9 +19,9 @@ class Verbosity:
 	def add_argparse_options(cls, parser):
 		"Clients can call this to add options to an argparse thingy to control verbosity."
 		parser.add_argument('-v', '--verbose', default=0, action='count',
-	  		help='Produce some more verbose output, default is a single line on success.')
+	  		help='produce some more verbose output, default is a single line on success')
 		parser.add_argument('-q', '--quiet', default=0, action='count',
-	  		help='Used once, only print errors; twice print _nothing_.')
+	  		help='ued once, only print errors; twice print _nothing_')
 		return parser
 
 	@classmethod

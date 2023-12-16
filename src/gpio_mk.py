@@ -30,40 +30,47 @@ class GPIOParse(csv_parser.CSVparse):
 		csv_parser.CSVparse.__init__(self)
 		self.COLUMN_NAMES = 'Pin Sig Func Description Group Apin Ppin Port AltFunc Comment'.split() # pylint: disable=invalid-name
 		self.metadata = { 'symbol': {}}
-	def handle_directive(self, directive, data):
-		directive = directive.lower()
-		data += ['', '']
-		if directive in 'processor project'.split():
-			if directive in self.metadata:
-				self.error(f"directive `{directive}' can only appear once")
-			self.metadata[directive] = data[:2]		# We check this later.
-		elif directive == 'symbol':
-			macro, expansion = data[:2]
-			if not codegen.is_ident(macro):
-				self.error(f"bad symbol name `{macro}'")
-			self.metadata['symbol'][data[0]] = macro, expansion
-		else:
-			super().handle_directive(directive, data)
+
+	# Directives...
+	def handle_directive_processor(self, directive, data):
+		if directive in self.metadata:
+			self.error(f"directive `{directive}' can only appear once")
+		p_family, p_type = data[:2]
+		self.metadata[directive] = p_family, p_type		# We check this later.
+	def handle_directive_project(self, directive, data):
+		if directive in self.metadata:
+			self.error(f"directive `{directive}' can only appear once")
+		self.metadata[directive] = data[0]
+	def handle_directive_symbol(self, directive, data):
+		macro, expansion, comment = data[:3]
+		if not codegen.is_ident(macro):
+			self.error(f"bad symbol name `{macro}'")
+		self.metadata['symbol'][macro] = expansion, comment
 	def on_first_data(self):
 		"Validate that we have the correct metadata."
 		proc, desc = self.metadata.get('processor', '*none*')
 		if proc.lower() != 'avr8':
 			self.error(f"cannot use processor `{proc}'")
-	def validate_col_Pin(self, pin_name): # pylint: disable=no-self-use,invalid-name
+
+	# Data, these are mostly static methods as they do not need instance or class access.
+	@staticmethod
+	def validate_col_Pin(pin_name): # pylint: disable=invalid-name
 		"Turn a pin name like D1/TXD -> '1'"
 		pin_name = pin_name.split('/')[0] 				# Get rid of possible alternate pin name after slash.
 		if pin_name.startswith('D'): 				# Arduino pins might start with a D
 			pin_name = pin_name[1:]
 		return pin_name
-	def validate_col_Sig(self, signame): # pylint: disable=no-self-use,invalid-name
-		'Not a valid C identifier'
+	@staticmethod
+	def validate_col_Sig(signame): # pylint: disable=invalid-name
+		'Must be a valid C identifier, return ALL_CAPS.'
 		if signame:
 			signame = codegen.ident_allcaps(signame)
 		return signame
-	def validate_col_Group(self, x): # pylint: disable=no-self-use,invalid-name
+	@staticmethod
+	def validate_col_Group(group): # pylint: disable=invalid-name
 		"Set to explicit `None' rather than empty."
-		return x if x else 'None'
-	def validate_col_Port(self, port): # pylint: disable=no-self-use,invalid-name
+		return group or 'None'
+	def validate_col_Port(self, port): # pylint: disable=invalid-name
 		"""Expected either blank or port like `PA3'."""
 		# If present then set extra keys to row io_port & io_bit.
 		# TODO: Pattern should be configurable for diffferent processors.
@@ -99,7 +106,8 @@ for d in parser.data:
 cg.add_include_guard()
 cg.add_autogen_comment()
 
-cg.add_comment(f'Pin Assignments for {parser.metadata.get("processor", "<none>")}, project: {parser.metadata.get("project", "<none>")}.')
+proc_family_type = parser.metadata["processor"]
+cg.add_comment(f'Pin Assignments for processor {proc_family_type[1]} [{proc_family_type[0]}], project: {parser.metadata.get("project", "<none>")}.')
 
 cg.add('enum {')
 cg.indent()
@@ -111,7 +119,7 @@ for group, pins in pins.items():
 cg.add('};', indent=-1, eat_nl=True)
 
 if parser.metadata['symbol']:
-	cg.add_comment("Extra symbols from symbol directive.")
+	cg.add_comment("Extra symbols from symbol directive.", add_nl=-1)
 	for sym, vc in parser.metadata['symbol'].items():
 		val, comment = vc
 		cg.add(f"#define GPIO_{sym} {val} // {comment}")
