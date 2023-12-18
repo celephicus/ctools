@@ -45,6 +45,9 @@ class Node:
 		self._add_attributes(attr)
 		self._check_extra_attributes(attr)
 		self._process_child_element_map()
+	def is_root(self):
+		"Check if node is the root of our tree. Typically the root node is really only a container or is very limited."
+		return self.root is self.parent
 	def _check_extra_attributes(self, attrs):
 		for attr_name in attrs:
 			if attr_name not in self.ATTRIBUTES:
@@ -312,11 +315,12 @@ class Transition(Node):
 class NodeWithInitTransition(Node):
 	"Abstract base class to capture that State & Machine elements can both have Init elements."
 	def get_superstates(self):
-		"Return list of enclosing states for this Node."
+		"Return list of enclosing states for this Node. Does not include Machine node at root."
 		superstates = [self]
-		while superstates[-1].parent:
+		while not superstates[-1].is_root():
 			superstates.append(superstates[-1].parent)
 		return superstates
+
 	def get_init_actions_state(self):
 		"Return tuple (list of init/entry actions, destination_state) for the given node (Machine or State)."
 		action_nodes = []

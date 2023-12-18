@@ -1,6 +1,6 @@
 /* This file is auto-generated. Do not edit. */
 
-/* Verbatim `include` code. */
+/* Verbatim `include' code. */
 #include <Arduino.h>
 
 #include "project_config.h"
@@ -9,7 +9,8 @@
 #include "event.h"
 #include "driver.h"
 #include "console.h"
-#include "app.h"/* Verbatim `include` code ends. */
+#include "app.h"
+/* Verbatim `include' code ends. */
 
 #include "sm_main.autogen.h"
 
@@ -22,7 +23,7 @@ static smk_context_sm_main_t context;
 
 #define PROP(member_) (context.member_)
 
-/* Verbatim `code` code. */
+/* Verbatim `code' code. */
 // Timeouts.
 static constexpr uint16_t MOTOR_STOP_DURATION_MS    = 1000U;
 static constexpr uint16_t RLY_OPERATE_DELAY_MS      = 200U;
@@ -53,7 +54,8 @@ static void set_run_relay(uint8_t st) {
     case RST_RUN_START: driverRelayWrite(M, REGS_RELAYS_MASK_START|REGS_RELAYS_MASK_RUN); break;
     case RST_RUN: driverRelayWrite(M, REGS_RELAYS_MASK_RUN); break;
     }
-}/* Verbatim `code` code ends. */
+}
+/* Verbatim `code' code ends. */
 
 void smk_process_sm_main(t_event ev) {
     if (EV_SM_RESET == event_id(ev)) {

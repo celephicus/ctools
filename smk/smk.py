@@ -78,7 +78,7 @@ def _handle_event_inheritance(mmm, mopt):	# pylint: disable=too-many-locals,too-
 		evdefs = []
 		for ev_name in model_keys(transmap):
 			# If we have no transitions, try up the states until we run out of states or find some transitions.
-			for handling_state in state_map[st_name].get_superstates()[:-1]: # Miss out machine as it has no transitions.
+			for handling_state in state_map[st_name].get_superstates():
 				evdefs = mmm[handling_state.name][ev_name]
 				if evdefs:
 					break
@@ -173,12 +173,11 @@ def _remove_untargetted_states(mmm, mopt):
 			# del mmm['.machine'].state_map[st_name]
 	return mmm
 
-def _generate_in_state_function(mmm, mopt):	# pylint: disable=unused-argument
+def _generate_in_state_data(mmm, mopt):	# pylint: disable=unused-argument
 	mmm['.in_state'] = {}
 	for state in mmm['.machine'].state_map.values():
 		superstates = [s.name for s in state.get_superstates()]
-		#print superstates
-		mmm['.in_state'][state.name] = [s in superstates for s in mmm['.machine'].state_map]
+		mmm['.in_state'][state.name] = superstates
 	return mmm
 
 def dump_model(mmm):
@@ -198,7 +197,7 @@ def build_model(mmm, mopt):
 	  _remove_untargetted_states,       # Removes states that are not targetted by transitions.
 	  _optimise_transition_sequences,   # Replaces some code with goto's to previous code.
 	  _remove_empty_transition_lists,
-	  _generate_in_state_function
+	  _generate_in_state_data
 	  ):
 		mmm = x(mmm, mopt)
 		if mopt.verbosity:

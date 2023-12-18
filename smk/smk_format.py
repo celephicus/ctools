@@ -1,21 +1,27 @@
+"""Output formatting classes for smk."""
+
 import sys, re, os, io, copy, textwrap, pprint
 import smk_utils
 
-def splitcode(s):
+# This warning flagged for Formatter subclasses that inherit member attributes.
+# pylint: disable=no-member
+
+def splitcode(code):
 	"""Given a string or list of strings representing "C" expressions, return a list of expressions."""
-	if not s:
+	if not code:
 		return []
-	if isinstance(s, str):
-		s = [s]
+	if isinstance(code, str):
+		code = [code]
 	exprs = []
-	for ss in s:
-		exprs += [x for x in [x.strip() for x in ss.split(';')] if x]
+	for frag in code:
+		exprs += [x for x in [x.strip() for x in frag.split(';')] if x]
 	return exprs
 
 # I like wide code.
 COLUMNS = 120
-def pretty_fill(s, indent=0):
-	return textwrap.fill(s, width=COLUMNS)
+def pretty_fill(text):
+	"Formats a string so that the max width is COLUMNS."
+	return textwrap.fill(text, width=COLUMNS)
 
 class OutputFormatter:
 	"""Abstract base class for a class that takes a model and generates one or more output files. It takes care not to
@@ -29,23 +35,22 @@ class OutputFormatter:
 
 	RE_SYMBOL = re.compile(r'\$\(([a-z_]+)\)', re.I)
 	@staticmethod
-	def sub(s, symbols):
+	def sub(text, symbols):
 		"Perform macro substitution from dict symbols into s, where macros are called as $(foo)."
 		def subber(m):
-			sol = s.rfind('\n', 0, m.start())
-			indent = s[sol+1:m.start()]
+			sol = text.rfind('\n', 0, m.start())
+			indent = text[sol+1:m.start()]
 			if indent and not indent.isspace():
 				indent = ''
 			repl = symbols[m.group(1)].splitlines()
 			if not repl:
 				return ''
-			else:
-				indented_repl = '\n'.join([repl[0]] + ['%s%s' % (indent, x) for x in repl[1:]])
-				return indented_repl
+			indented_repl = '\n'.join([repl[0]] + [indent + x for x in repl[1:]])
+			return indented_repl
 		while 1:
-			s, n = OutputFormatter.RE_SYMBOL.subn(subber, s)
-			if not n:
-				return s
+			text, in_progress = OutputFormatter.RE_SYMBOL.subn(subber, text)
+			if not in_progress:
+				return text
 
 	def __init__(self, path, options, extra_symbol_defs=None):
 		"""Initialise with a path. If the Formatter has more than 1 output file, the supplied extension (if any) is
@@ -54,8 +59,8 @@ class OutputFormatter:
 		self.filepaths = self._get_filepaths(path)
 		self.ofs = []
 		assert len(self.filepaths) == len(self.STREAMS)
-		for i, s in enumerate(self.STREAMS):
-			setattr(self, s, i)
+		for i, ostream in enumerate(self.STREAMS):
+			setattr(self, ostream, i)
 			self.ofs.append(io.StringIO())
 
 		# Build a dict of symbol definitions that we use.
@@ -63,55 +68,71 @@ class OutputFormatter:
 		self.symbol_definitions.update(extra_symbol_defs or {})
 
 		# Build a dict of symbols with default values.
-		self.symbols = dict([(n, v[0]) for (n, v) in self.symbol_definitions.items()])
+		self.symbols = {n: v[0] for n, v in self.symbol_definitions.items()}
 
 	def _get_filepaths(self, path):
 		"Return a list of output file paths."
 		if not path: # Give a default filename.
 			return self.DEFAULT_FILENAMES
 		if len(self.DEFAULT_FILENAMES) > 1 or not os.path.splitext(path)[1]: # Frob the extensions.
-			return tuple([os.path.splitext(path)[0] + os.path.splitext(p)[1] for p in self.DEFAULT_FILENAMES])
+			return tuple([os.path.splitext(path)[0] + os.path.splitext(p)[1] for p in self.DEFAULT_FILENAMES]) # pylint: disable=consider-using-generator
 		return (path,)
+
 	def blurt(self, msg):
+		"Write a message depending on verbosity setting."
 		if self.options.verbosity:
 			sys.stdout.write(msg + '\n')
-	def preprocess(self, s):
+
+	def _preprocess(self, text):
 		pass
-	def write(self, s, stream=0):
-		self.ofs[stream].write(self.preprocess(OutputFormatter.sub(s, self.symbols)))
+
+	def write(self, text, stream=0):
+		"Write data to specified stream."
+		self.ofs[stream].write(self._preprocess(OutputFormatter.sub(text, self.symbols)))
+
 	def close(self):
-		for filepath, of in zip(self.filepaths, self.ofs):
-			outstr = of.getvalue()
-			of.close()
-			try:
-				existing = open(filepath, 'rt').read()
-			except Exception:
+		"Finished writing so write all streams to output files"
+		for filepath, ostream in zip(self.filepaths, self.ofs):
+			outstr = ostream.getvalue()
+			ostream.close()
+
+			try:		# Read existing file contents, if any.
+				with open(filepath, 'rt', encoding="utf-8") as fout_r:
+					existing = fout_r.read()
+			except EnvironmentError:
 				existing = None
-			if existing != outstr:
-				open(filepath, 'wt').write(outstr)
-				self.blurt('Wrote file `%s`.' % filepath)
+
+			if existing != outstr:	# Write if changed.
+				with open(filepath, 'wt', encoding="utf-8") as fd_out:
+					fd_out.write(outstr)
+				self.blurt(f"Wrote file `{filepath}'.")
 			else:
-				self.blurt('File `%s` not written as unchanged.' % filepath)
+				self.blurt(f"File `{filepath}' not written as unchanged.")
+
 	def abort(self):
+		"Something has gone wrong. Attempt to delete all output files."
 		for filepath in self.filepaths:
 			if os.path.exists(filepath):
 				try:
 					os.remove(filepath)
-					self.blurt('Deleted file `%s`.' % filepath)
+					self.blurt(f"Deleted file `{filepath}'.")
 				except OSError:
-					self.blurt('Failed to delete file `%s`.' % filepath)
-	def generate(self, model, nmgr, options):
+					self.blurt(f"Failed to delete file `{filepath}'.")
+
+	def generate(self, model):
+		"Override in subclasses to write output."
 		raise NotImplementedError
 
-class Formatter_XML(OutputFormatter):
+class Formatter_XML(OutputFormatter): 	# pylint: disable=invalid-name
+	"Emit model as nicely formatted XML. Still XML though."
 	DEFAULT_FILENAMES = ('output.xml',)
 	STREAMS = ('DEFAULT',)
-	def __init__(self, path, options, extra_symbol_defs=None):
-		OutputFormatter.__init__(self, path, options, extra_symbol_defs)
 	def generate(self, model):
-		model['.machine']._toxml(self.ofs[self.DEFAULT])
+		"Generate output."
+		model['.machine'].toxml(self.ofs[self.DEFAULT])
 
-class Formatter_C(OutputFormatter):
+class Formatter_C(OutputFormatter):		# pylint: disable=invalid-name
+	"Emit C code with an external context variable."
 	SYMBOL_DEFINITIONS = {
 		'EVENT_ACCESSOR': (
 		  '(ev)',
@@ -145,22 +166,47 @@ class Formatter_C(OutputFormatter):
 	STREAMS = ('HEADER', 'SOURCE')
 	def __init__(self, path, options, extra_symbol_defs=None):
 		OutputFormatter.__init__(self, path, options, extra_symbol_defs or self.EXTRA_SYMBOL_DEFINITIONS)
-	def assert_transition_map_is_valid(self, transmap):
+
+	@staticmethod
+	def assert_transition_map_is_valid(transmap):
 		"""Transmap is a list of (guard, [actions], target). To generate valid code we assert that the first N-1
 			items in the list have guards (the last item can have a guard or not, we don't care."""
-		for guard, actions, target in transmap[:-1]:
-			assert guard, "Unguarded transition found in first N-1 items of %s." % pprint.pformat(transmap, width=120)
-	def mk_event_name(self, ev_name):
+		for guard in [x[0] for x in transmap[:-1]]:
+			assert guard, f"Unguarded transition found in first N-1 items of {pprint.pformat(transmap, width=120)}"
+
+	@staticmethod
+	def mk_event_name(ev_name):
+		"Make a canonical event name."
 		return ev_name.upper()
 
 	RE_PREPROCESS = re.compile(r'\$SMK_CHANGE_STATE\((\w+)\)')
-	def preprocess(self, s):
+	def _preprocess(self, text):
 		repl = '; '.join([x for x in (self.symbols['CHANGE_STATE_HOOK'], 'PROP(state_) = st_') if x and not x.isspace()])
 		def subber(m):
 			return repl.replace('st_', m.group(1))
-		return self.RE_PREPROCESS.sub(subber, s)
+		return self.RE_PREPROCESS.sub(subber, text)
 
-	def generate(self, model):
+	def _generate_is_in_state_data(self, model):
+		""" We generate a matrix of bitmasks that are used to determine if the SM is in a particular state, which might
+		be an abstract state with no transitions, only with entry.exit actions, used as a container for substates.
+		"""
+		pprint.pprint(model['.in_state'])
+		superstate_map = model['.in_state']
+		states = list(superstate_map.keys())
+		STRIDE = (len(states) + 7) // 8 # Each entry is this bytes wide. # pylint: disable=invalid-name
+		is_in_data = []
+		for sm_state_name in superstate_map:
+			mask = 0
+			for check_state_name in superstate_map[sm_state_name]:
+				mask |= 1 << states.index(check_state_name)
+			is_in_data += [(mask >> (i*8)) & 0xff for i in range(STRIDE)]
+
+		self.symbols['IS_IN_DATA'] = pretty_fill(', '.join([f'0x{x:02x}' for x in is_in_data]))
+		self.symbols['IS_IN_DATA_DIM'] = str(STRIDE)
+
+	def generate(self, model):	# pylint: disable=too-many-branches,too-many-statements,too-many-locals
+		"Generate output."
+
 		self.symbols['MACHINE_NAME'] = model['.machine'].name
 		self.symbols['MACHINE_NAME_UC'] = model['.machine'].name.upper()
 		self.symbols['HEADER_FILE_NAME'] = self.filepaths[self.HEADER]
@@ -170,47 +216,37 @@ class Formatter_C(OutputFormatter):
 		for elementname, symbolname in (('include', 'VERBATIM_INCLUDE'), ('code', 'VERBATIM_CODE')):
 			content = getattr(model['.machine'], elementname)
 			if content:
-				#content = ''.join(['%s\n' % x for x in splitcode(content)])
-				source_code = \
-				  '/* Verbatim `%s` code. */\n%s/* Verbatim `%s` code ends. */\n' % (elementname, content, elementname)
+				source_code = f"""\
+/* Verbatim `{elementname}' code. */
+{content}
+/* Verbatim `{elementname}' code ends. */
+"""
 				self.symbols[symbolname] = source_code
 			else:
 				self.symbols[symbolname] = ''
 
 		self.symbols['CONTEXT_DECL'] = \
-		  '\n'.join(['%s;' % x for x in ['$(STATE_TYPE) state_'] + splitcode(model['.machine'].property)])
+		  '\n'.join([f'{x};' for x in ['$(STATE_TYPE) state_'] + splitcode(model['.machine'].property)])
 		reset_actions, reset_state = model['.machine'].get_init_actions_state()
 		self.symbols['STATE_DECL'] = \
-		  ',\n'.join(['%s = %d' % (smk_utils.mk_state_name(x), i) for i, x in enumerate(model['.machine'].state_map)])
-		reset_code = '\n'.join(['    %s;' % x for x in splitcode(reset_actions)]);
+		  ',\n'.join([f'{smk_utils.mk_state_name(x)} = {i}' for i, x in enumerate(model['.machine'].state_map)])
+		reset_code = '\n'.join([f'    {x};' for x in splitcode(reset_actions)])
 		self.symbols['RESET_FUNCTION_BODY'] = reset_code or '/* empty */'
 		self.symbols['INITIAL_STATE'] = smk_utils.mk_state_name(reset_state.name)
 
-		# Generate data for in_state() function.
-		is_in_data = []
-		for state_name, is_in_array in model['.in_state'].items():
-			array_len = ((len(is_in_array) + 7) // 8)
-			is_in_array += [False] * (array_len * 8 - len(is_in_array)) # Pad to multiple of 8.
-			for i in range(array_len):
-				d = 0
-				for j in range(8):
-					d = (d >> 1) | (is_in_array.pop(0) * 0x80)
-				is_in_data.append(d)
-
-		self.symbols['IS_IN_DATA'] = pretty_fill(', '.join(['0x%02x' % x for x in is_in_data]))
-		self.symbols['IS_IN_DATA_DIM'] = str(array_len)
+		self._generate_is_in_state_data(model)
 
 		# Write main nested switch statement body.
 		handler = []
-		for st_name, evdict in model.items():
+		for st_name, evdict in model.items():	# pylint: disable=too-many-nested-blocks
 			#print(st_name, evdict)
 			if st_name.startswith('.'):
 				continue
-			handler.append('case %s:' % smk_utils.mk_state_name(st_name))
+			handler.append(f'case {smk_utils.mk_state_name(st_name)}:')
 			handler.append('    switch($(EVENT_ACCESSOR)) {')
 
 			for ev_name, event_defs in evdict.items():
-				handler.append('    case %s:' % self.mk_event_name(ev_name))
+				handler.append(f'    case {self.mk_event_name(ev_name)}:')
 
 				# Check if the only action for this handler is a goto,
 				if isinstance(event_defs, str):
@@ -225,22 +261,21 @@ class Formatter_C(OutputFormatter):
 					except KeyError:
 						pass
 
-					for trans_index, trans_def in enumerate(event_defs):
-						guard, actions, target = trans_def
+					for trans_index, (guard, actions, target) in enumerate(event_defs):	# pylint: disable=unused-variable
 						if guard:
 							if trans_index == 0:
-								handler.append('    if(%s) {' % guard)
+								handler.append(f'    if({guard}) {{')
 							else:
-								handler.append('    else if(%s) {' % guard)
+								handler.append(f'    else if({guard}) {{')
 						else:
 							if trans_index > 0:
 								handler.append('    else {')
 
 						# Emit all actions...
-						for a in splitcode(actions):
-							if not a.endswith(';'):
-								a = a + ';'
-							handler.append('        ' + a)
+						for action in splitcode(actions):
+							if not action.endswith(';'):
+								action = action + ';'
+							handler.append('        ' + action)
 
 						if guard or trans_index > 0:
 							handler.append('    }')
@@ -253,12 +288,17 @@ class Formatter_C(OutputFormatter):
 		self.write(self.HEADER_TEMPLATE, stream=self.HEADER)
 		self.write(self.SOURCE_TEMPLATE, stream=self.SOURCE)
 
-class Formatter_C_StaticContext(Formatter_C):
+class Formatter_C_StaticContext(Formatter_C):	# pylint: disable=invalid-name
+	"Emit code for a state machine with a static context variable, so only one instance can be used,"
+
 	@staticmethod
-	def insertLines(s1, s2):
-		lns1 = s1.splitlines(1)
-		lns2 = s2.splitlines(1)
+	def insert_lines(txt1, txt2):
+		"""Insert a bunch of lines from txt2 just before the last line in txt1.
+		Used for munging templates to add stuff at the end."""
+		lns1 = txt1.splitlines(True)
+		lns2 = txt2.splitlines(True)
 		return ''.join(lns1[:-1] + lns2 + lns1[-1:])
+
 	HEADER_TEMPLATE = """\
 /* This file is auto-generated. Do not edit. */
 
@@ -311,12 +351,13 @@ void smk_process_$(MACHINE_NAME)($(EVENT_REFERENCE_TYPE) ev) {
 		Formatter_C.__init__(self, path, options)
 
 
-class Formatter_C_StaticContextIsIn(Formatter_C_StaticContext):
-	HEADER_TEMPLATE = Formatter_C_StaticContext.insertLines(Formatter_C_StaticContext.HEADER_TEMPLATE, """\
+class Formatter_C_StaticContextIsIn(Formatter_C_StaticContext): 	# pylint: disable=invalid-name
+	"Emit code for a function to check if we are in a particulat state or substate thereof."
+	HEADER_TEMPLATE = Formatter_C_StaticContext.insert_lines(Formatter_C_StaticContext.HEADER_TEMPLATE, """\
 bool smk_is_in_$(MACHINE_NAME)($(STATE_TYPE) state);
 
 """)
-	SOURCE_TEMPLATE = Formatter_C_StaticContext.insertLines(Formatter_C_StaticContext.SOURCE_TEMPLATE, """\
+	SOURCE_TEMPLATE = Formatter_C_StaticContext.insert_lines(Formatter_C_StaticContext.SOURCE_TEMPLATE, """\
 static const uint8_t is_in_data[] = {
     $(IS_IN_DATA)
 };
@@ -326,6 +367,3 @@ bool smk_is_in_$(MACHINE_NAME)($(STATE_TYPE) state) {
 }
 
 """)
-	def __init__(self, path, options):
-		Formatter_C_StaticContext.__init__(self, path, options)
-
