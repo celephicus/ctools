@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<machine name="sm_main">
+
+<include> 
+#include &lt;Arduino.h&gt;
+
+#include "project_config.h"
+#include "utils.h"
+#include "regs.h"
+#include "event.h"
+#include "driver.h"
+#include "console.h"
+#include "app.h"
+</include>   
+
+<code>
+// Timeouts.
+static constexpr uint16_t MOTOR_STOP_DURATION_MS    = 1000U;
+static constexpr uint16_t RLY_OPERATE_DELAY_MS      = 200U;
+
+// Timers
+enum {
+    TIMER_MOTOR_STOP,
+};
+constexpr uint8_t EV_TIMEOUT_MOTOR_STOP = EVENT_MK_TIMER_EVENT_ID(TIMER_MOTOR_STOP);
+
+static bool is_timer_valid(t_event&amp; ev) {
+    return event_p8(ev) == eventSmTimerCookie(event_id(ev)-EV_TIMEOUT_0);
+}
+
+static bool is_dir_rev() { return regsFlags() &amp; REGS_FLAGS_MASK_MOTOR_DIR_REVERSE; }
+static void update_dir_indicator(uint16_t flash) {
+    driverIndicatorSet(DRIVER_INDICATOR_DIR, 
+      is_dir_rev() ? DRIVER_INDICATOR_COLOUR_RED : DRIVER_INDICATOR_COLOUR_GREEN, flash);
+}
+
+// We abstract run relay control to a few states.
+enum { RST_STOP, RST_START, RST_RUN_START, RST_RUN, };
+static void set_run_relay(uint8_t st) {
+    constexpr uint16_t M = REGS_RELAYS_MASK_RUN|REGS_RELAYS_MASK_START;
+    switch (st) {
+    case RST_STOP:  driverRelayWrite(M, 0U); break;
+    case RST_START: driverRelayWrite(M, REGS_RELAYS_MASK_START); break;
+    case RST_RUN_START: driverRelayWrite(M, REGS_RELAYS_MASK_START|REGS_RELAYS_MASK_RUN); break;
+    case RST_RUN: driverRelayWrite(M, REGS_RELAYS_MASK_RUN); break;
+    }
+}
+</code>
+
+<init target='Active'/>
+
+<state name='Active'>
+    <init target='Stopping'/>
+    <entry>
+        update_dir_indicator(DRIVER_INDICATOR_FLASH_SOLID);
+        if (regsFlags() &amp; REGS_FLAGS_MASK_ESTOP)
+            eventPublishEvFront(EV_SW_ESTOP);
+    </entry>
+
+    <transition event='EV_SW_ESTOP' guard='event_p8(ev) == EV_P8_SW_CLICK' target='Estop'/>
+    
+    <state name='Stopping'>
+        <entry>
+            set_run_relay(RST_STOP);
+            driverIndicatorSet(DRIVER_INDICATOR_RUN, DRIVER_INDICATOR_COLOUR_BLUE, DRIVER_INDICATOR_FLASH_VFAST);
+            eventSmTimerStart(TIMER_MOTOR_STOP, REGS[REGS_IDX_MOTOR_RUN_DOWN_DURATION]/CFG_EVENT_TIMER_PERIOD_MS);
+        </entry>
+        <transition event='EV_TIMEOUT_MOTOR_STOP' guard='is_timer_valid(ev)' target='Stop'/>
+    </state>
+
+    <state name='Stop'>
+        <entry>
+            set_run_relay(RST_STOP);
+            driverRelayWrite(REGS_RELAYS_MASK_DIR_1|REGS_RELAYS_MASK_DIR_2, 0U);
+            driverIndicatorSet(DRIVER_INDICATOR_RUN, DRIVER_INDICATOR_COLOUR_OFF, DRIVER_INDICATOR_FLASH_SOLID);
+        </entry>
+        <transition event='EV_SW_DIR EV_REM1_DIR EV_REM2_DIR' guard='event_p8(ev) == EV_P8_SW_CLICK'>
+            regsToggleMaskFlags(REGS_FLAGS_MASK_MOTOR_DIR_REVERSE);
+            update_dir_indicator(DRIVER_INDICATOR_FLASH_SOLID);
+        </transition>
+        <transition event='EV_SW_RUN EV_REM1_RUN EV_REM2_RUN' guard='event_p8(ev) == EV_P8_SW_CLICK' target='Running'/>
+    </state>
+
+    <state name='Running'>
+        <init target='SetDir'/>
+
+        <state name='SetDir'>
+            <entry>
+                driverRelayWrite(REGS_RELAYS_MASK_DIR_1|REGS_RELAYS_MASK_DIR_2, 
+                  is_dir_rev() ? REGS_RELAYS_MASK_DIR_2 : REGS_RELAYS_MASK_DIR_1); 
+                eventSmTimerStart(TIMER_MOTOR_STOP, RLY_OPERATE_DELAY_MS/CFG_EVENT_TIMER_PERIOD_MS);
+            </entry>
+            <transition event='EV_TIMEOUT_MOTOR_STOP' guard='is_timer_valid(ev)' target='Start'/>
+        </state>
+
+        <state name='Start'>
+            <entry>
+                set_run_relay(RST_START);
+                driverIndicatorSet(DRIVER_INDICATOR_RUN, DRIVER_INDICATOR_COLOUR_BLUE, DRIVER_INDICATOR_FLASH_VFAST);
+                eventSmTimerStart(TIMER_MOTOR_STOP, REGS[REGS_IDX_MOTOR_SOFT_START_DURATION]/CFG_EVENT_TIMER_PERIOD_MS);
+            </entry>
+            <transition event='EV_TIMEOUT_MOTOR_STOP' guard='is_timer_valid(ev)' target='Run'/>
+        </state>
+
+        <state name='Run'>
+            <entry>
+                set_run_relay(RST_RUN_START);
+                eventSmTimerStart(TIMER_MOTOR_STOP, RLY_OPERATE_DELAY_MS/CFG_EVENT_TIMER_PERIOD_MS);
+            </entry>
+            <transition event='EV_TIMEOUT_MOTOR_STOP' guard='is_timer_valid(ev)'>
+                set_run_relay(RST_RUN);
+                driverIndicatorSet(DRIVER_INDICATOR_RUN, DRIVER_INDICATOR_COLOUR_BLUE, DRIVER_INDICATOR_FLASH_SOLID);
+            </transition>
+        </state>
+
+        <transition event='EV_SW_DIR EV_REM1_DIR EV_REM2_DIR' guard='event_p8(ev) == EV_P8_SW_CLICK' target='Stopping'/>
+        <transition event='EV_SW_RUN EV_REM1_RUN EV_REM2_RUN' guard='event_p8(ev) == EV_P8_SW_CLICK' target='Stopping'/>
+    </state>
+    
+</state>
+
+<state name='Estop'>
+    <entry>
+        set_run_relay(RST_STOP);
+        driverIndicatorSet(DRIVER_INDICATOR_RUN, DRIVER_INDICATOR_COLOUR_RED, DRIVER_INDICATOR_FLASH_FAST);
+        update_dir_indicator(DRIVER_INDICATOR_FLASH_FAST);
+    </entry>
+    <transition event='EV_SW_ESTOP' guard='event_p8(ev) == EV_P8_SW_RELEASE' target='Stopping'/>
+</state>
+
+</machine>

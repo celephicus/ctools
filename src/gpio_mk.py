@@ -2,7 +2,7 @@
 
 """Code generator to turn a CSV representation of GPIO signals into a bunch of definitions for a C header file.
 """
-import sys, re, os, argparse
+import re, os, argparse
 import csv_parser
 import codegen
 
@@ -33,24 +33,28 @@ class GPIOParse(csv_parser.CSVparse):
 
 	# Directives...
 	def handle_directive_processor(self, directive, data):
+		"""Processor has args family, type; e.g AVR8, Arduino Pro Micro 3.3V/8MHz.
+			Family must match a known family, type is free-form."""
 		if directive in self.metadata:
 			self.error(f"directive `{directive}' can only appear once")
 		p_family, p_type = data[:2]
-		self.metadata[directive] = p_family, p_type		# We check this later.
+		self.metadata[directive] = p_family.lower(), p_type		# We check this later.
 	def handle_directive_project(self, directive, data):
+		"Project is free form."
 		if directive in self.metadata:
 			self.error(f"directive `{directive}' can only appear once")
 		self.metadata[directive] = data[0]
-	def handle_directive_symbol(self, directive, data):
-		macro, expansion, comment = data[:3]
+	def handle_directive_symbol(self, directive, data):	 # pylint: disable=unused-argument
+		"Args macro, value, comment, e.g @symbol,FOO,33,What to from the foo."
+		macro, d_val, d_comment = data[:3]
 		if not codegen.is_ident(macro):
 			self.error(f"bad symbol name `{macro}'")
-		self.metadata['symbol'][macro] = expansion, comment
+		self.metadata['symbol'][macro] = d_val, d_comment
 	def on_first_data(self):
 		"Validate that we have the correct metadata."
-		proc, desc = self.metadata.get('processor', '*none*')
-		if proc.lower() != 'avr8':
-			self.error(f"cannot use processor `{proc}'")
+		p_family = self.metadata.get('processor', ['*none*'])[0]
+		if p_family != 'avr8':
+			self.error(f"cannot use processor `{p_family}'")
 
 	# Data, these are mostly static methods as they do not need instance or class access.
 	@staticmethod
@@ -67,9 +71,9 @@ class GPIOParse(csv_parser.CSVparse):
 			signame = codegen.ident_allcaps(signame)
 		return signame
 	@staticmethod
-	def validate_col_Group(group): # pylint: disable=invalid-name
+	def validate_col_Group(x): # pylint: disable=invalid-name
 		"Set to explicit `None' rather than empty."
-		return group or 'None'
+		return x or 'None'
 	def validate_col_Port(self, port): # pylint: disable=invalid-name
 		"""Expected either blank or port like `PA3'."""
 		# If present then set extra keys to row io_port & io_bit.
