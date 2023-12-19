@@ -190,7 +190,6 @@ class Formatter_C(OutputFormatter):		# pylint: disable=invalid-name
 		""" We generate a matrix of bitmasks that are used to determine if the SM is in a particular state, which might
 		be an abstract state with no transitions, only with entry.exit actions, used as a container for substates.
 		"""
-		pprint.pprint(model['.in_state'])
 		superstate_map = model['.in_state']
 		states = list(superstate_map.keys())
 		STRIDE = (len(states) + 7) // 8 # Each entry is this bytes wide. # pylint: disable=invalid-name
