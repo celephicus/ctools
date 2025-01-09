@@ -7,14 +7,26 @@ import codegen
 
 INFILE_DEFAULT = 'regs_local.h'
 
+# Default formats for the various types of register. Format defaults to first. 
+FORMATS_DEFAULT = {'unsigned': '"%u"', 'signed': '"%d"', 'hex': '"%04x"'}
+
 # Parse command line arguments.
 arg_parser = argparse.ArgumentParser(description='Updates register definitions from embedded text comments.')
 arg_parser.add_argument('infile', default=INFILE_DEFAULT, nargs='?', help='Input file, will be overwritten.')
+arg_parser.add_argument('--formats', default=','.join(FORMATS_DEFAULT.values()), nargs='?',
+	help='Format symbols for unsigned, signed, hex values.')
 
 codegen.Verbosity.add_argparse_options(arg_parser)
 options = arg_parser.parse_args()
 codegen.Verbosity.parse_options(options)	# Sort out verbosity.
 
+# Get symbols used to denote printing formats for registers.
+formats = [_.strip() for _ in options.formats.split(',')]
+if len(formats) != len(FORMATS_DEFAULT):
+	sys.exit("Error: expected {len(FORMATS_DEFAULT)} comma separated values for --format...", 2)
+formats = dict(zip(FORMATS_DEFAULT.keys(), formats))
+
+# Make parser.
 class RegionParser:		# pylint: disable=too-few-public-methods
 	"""Parse a file into N+2 regions separated by N tags."""
 	NEXT = r'\[\[\[    >>>  .*   \]\]\]'.split()
@@ -60,7 +72,7 @@ def error(msg, flineno=None):
 
 registers = {}
 # defs with ident in col 1 are registers, with a 5-tuple of (fields, default-value, options, short-description, long-description).
-# Options are a default value as an int, optional `nv' and one of (`hex', 'signed').
+# Options are a default value as an int, optional `nv' and one of (`hex', 'signed', 'unsigned').
 # defs with leading whitepsace are fields, and add a dict of name: 2-tuple of (bits, description). Options are bit `3' or range `5..7'.
 REG_IDX_FIELDS, REG_IDX_DEFAULT, REG_IDX_OPTIONS, REG_IDX_DESC, REG_IDX_LONG_DESC = range(5)
 FIELD_IDX_BITS, FIELD_IDX_MASK, FIELD_IDX_DESC, FIELD_IDX_LONG_DESC = range(4)
@@ -105,7 +117,7 @@ for lineno, lns in llines:
 			elif opt == 'nv':
 				options[opt] = ''
 			elif opt == 'fmt':
-				if r_options[opt] not in 'hex signed'.split(): error(f"{name}: bad fmt option value.", lineno)
+				if r_options[opt] not in formats.keys(): error(f"{name}: bad fmt option value.", lineno)
 				options['fmt'] = r_options[opt]
 			else:
 				error(f"{name}: illegal option `{opt}'.", lineno)
@@ -189,8 +201,7 @@ nv_reg_names = list(registers)[reg_first_nv:]
 cg.add(f"#define REGS_NV_DEFAULT_VALS {', '.join([str(registers[r][REG_IDX_DEFAULT]) for r in nv_reg_names])}")
 
 cg.add_comment('Define how to format the reg when printing.', add_nl=-1)
-FORMATS = {'signed': 'D', 'unsigned': 'U', 'hex': 'X'}
-p_format = [f"CFMT_{FORMATS[r[REG_IDX_OPTIONS]['fmt']]}" for r in registers.values()]
+p_format = [formats[r[REG_IDX_OPTIONS]['fmt']] for r in registers.values()]
 cg.add(f"#define REGS_FORMAT_DEF {', '.join(p_format)}")
 
 for f in registers.items():
